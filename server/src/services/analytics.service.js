@@ -1,94 +1,63 @@
-const mongoose = require("mongoose");
-const Food = require("../models/food.model");
+const { supabaseAdmin } = require("../config/supabase");
 const { calculateWastePercentage } = require("../utils/wasteCalculator");
 
+async function listUserFoods(userId) {
+  const { data, error } = await supabaseAdmin
+    .from("foods")
+    .select("category, quantity, status, created_at, wasted_at, updated_at")
+    .eq("user_id", userId);
+
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
 async function getOverview(userId) {
-  const objectId = new mongoose.Types.ObjectId(userId);
+  const rows = await listUserFoods(userId);
 
-  const [totals] = await Food.aggregate([
-    { $match: { userId: objectId } },
-    {
-      $group: {
-        _id: null,
-        totalAdded: { $sum: "$quantity" },
-        totalConsumed: {
-          $sum: {
-            $cond: [{ $eq: ["$status", "consumed"] }, "$quantity", 0],
-          },
-        },
-        totalWasted: {
-          $sum: {
-            $cond: [{ $eq: ["$status", "wasted"] }, "$quantity", 0],
-          },
-        },
-      },
-    },
-  ]);
-
-  const result = totals || {
-    totalAdded: 0,
-    totalConsumed: 0,
-    totalWasted: 0,
-  };
+  const totalAdded = rows.reduce((sum, row) => sum + (row.quantity || 0), 0);
+  const totalConsumed = rows
+    .filter((row) => row.status === "consumed")
+    .reduce((sum, row) => sum + (row.quantity || 0), 0);
+  const totalWasted = rows
+    .filter((row) => row.status === "wasted")
+    .reduce((sum, row) => sum + (row.quantity || 0), 0);
 
   return {
-    ...result,
-    wastePercentage: calculateWastePercentage(result.totalConsumed, result.totalWasted),
+    totalAdded,
+    totalConsumed,
+    totalWasted,
+    wastePercentage: calculateWastePercentage(totalConsumed, totalWasted),
   };
 }
 
 async function getCategoryBreakdown(userId) {
-  const objectId = new mongoose.Types.ObjectId(userId);
+  const rows = await listUserFoods(userId);
+  const grouped = new Map();
 
-  const rows = await Food.aggregate([
-    { $match: { userId: objectId, status: "wasted" } },
-    {
-      $group: {
-        _id: "$category",
-        value: { $sum: "$quantity" },
-      },
-    },
-    { $sort: { value: -1 } },
-  ]);
+  rows
+    .filter((row) => row.status === "wasted")
+    .forEach((row) => {
+      const key = row.category || "Other";
+      grouped.set(key, (grouped.get(key) || 0) + (row.quantity || 0));
+    });
 
-  return rows.map((row) => ({
-    name: row._id,
-    value: row.value,
-  }));
+  return Array.from(grouped.entries()).map(([name, value]) => ({ name, value }));
 }
 
 async function getMonthlyWasteTrend(userId) {
-  const objectId = new mongoose.Types.ObjectId(userId);
+  const rows = await listUserFoods(userId);
+  const grouped = new Map();
 
-  const sixMonthsAgo = new Date();
-  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
-  sixMonthsAgo.setDate(1);
-  sixMonthsAgo.setHours(0, 0, 0, 0);
+  rows
+    .filter((row) => row.status === "wasted")
+    .forEach((row) => {
+      const source = row.wasted_at || row.updated_at || row.created_at;
+      const date = new Date(source);
+      const key = `${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
+      grouped.set(key, (grouped.get(key) || 0) + (row.quantity || 0));
+    });
 
-  const rows = await Food.aggregate([
-    {
-      $match: {
-        userId: objectId,
-        status: "wasted",
-        wastedAt: { $gte: sixMonthsAgo },
-      },
-    },
-    {
-      $group: {
-        _id: {
-          year: { $year: "$wastedAt" },
-          month: { $month: "$wastedAt" },
-        },
-        waste: { $sum: "$quantity" },
-      },
-    },
-    { $sort: { "_id.year": 1, "_id.month": 1 } },
-  ]);
-
-  return rows.map((row) => ({
-    name: `${String(row._id.month).padStart(2, "0")}/${row._id.year}`,
-    waste: row.waste,
-  }));
+  return Array.from(grouped.entries()).map(([name, waste]) => ({ name, waste }));
 }
 
 module.exports = {

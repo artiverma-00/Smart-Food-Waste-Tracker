@@ -1,10 +1,9 @@
-const jwt = require("jsonwebtoken");
-const config = require("../config");
-const User = require("../models/user.model");
+const { supabaseAnon } = require("../config/supabase");
 
 async function authMiddleware(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
+
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({
         success: false,
@@ -14,10 +13,10 @@ async function authMiddleware(req, res, next) {
     }
 
     const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, config.jwtSecret);
 
-    const user = await User.findById(decoded.userId).select("_id name email");
-    if (!user) {
+    const { data, error } = await supabaseAnon.auth.getUser(token);
+
+    if (error || !data?.user) {
       return res.status(401).json({
         success: false,
         message: "Unauthorized: invalid token",
@@ -26,16 +25,17 @@ async function authMiddleware(req, res, next) {
     }
 
     req.user = {
-      userId: user._id.toString(),
-      name: user.name,
-      email: user.email,
+      userId: data.user.id,
+      email: data.user.email,
+      name: data.user.user_metadata?.name || data.user.email?.split("@")[0] || "User",
+      token,
     };
 
     return next();
   } catch (error) {
     return res.status(401).json({
       success: false,
-      message: "Unauthorized: invalid or expired token",
+      message: "Unauthorized",
       data: {},
     });
   }

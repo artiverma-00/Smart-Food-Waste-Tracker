@@ -4,37 +4,22 @@ import * as authService from "../services/auth.service";
 export const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(null);
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [token, setToken] = useState(() => localStorage.getItem("token"));
+  const [user, setUser] = useState(() => {
+    const raw = localStorage.getItem("user");
+    return raw ? JSON.parse(raw) : null;
+  });
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    let mounted = true;
+    if (token) localStorage.setItem("token", token);
+    else localStorage.removeItem("token");
+  }, [token]);
 
-    const initialize = async () => {
-      try {
-        const session = await authService.getCurrentSession();
-        if (mounted) {
-          setToken(session.token);
-          setUser(session.user);
-        }
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-
-    initialize();
-
-    const { data: subscription } = authService.onAuthStateChange((session) => {
-      setToken(session.token);
-      setUser(session.user);
-    });
-
-    return () => {
-      mounted = false;
-      subscription?.subscription?.unsubscribe?.();
-    };
-  }, []);
+  useEffect(() => {
+    if (user) localStorage.setItem("user", JSON.stringify(user));
+    else localStorage.removeItem("user");
+  }, [user]);
 
   const login = async (payload) => {
     setLoading(true);

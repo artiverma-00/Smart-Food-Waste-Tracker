@@ -1,98 +1,33 @@
-import { supabase } from "./supabase";
+import api from "./api";
 
-function mapFoodRow(row) {
-  return {
-    id: row.id,
-    name: row.name,
-    category: row.category,
-    quantity: row.quantity,
-    expiryDate: row.expiry_date,
-    status: row.status,
-    notes: row.notes || "",
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
+function unwrapResponse(data, fallback) {
+  if (!data?.success) {
+    throw new Error(data?.message || fallback);
+  }
+  return data.data;
 }
 
 export async function getFoods() {
-  const { data, error } = await supabase
-    .from("foods")
-    .select("id, name, category, quantity, expiry_date, status, notes, created_at, updated_at")
-    .order("created_at", { ascending: false });
-
-  if (error) throw error;
-  return (data || []).map(mapFoodRow);
+  const { data } = await api.get("/food");
+  return unwrapResponse(data, "Failed to fetch foods").items || [];
 }
 
 export async function createFood(payload) {
-  const { data: authData, error: authError } = await supabase.auth.getUser();
-  if (authError) throw authError;
-
-  const userId = authData.user?.id;
-  if (!userId) throw new Error("User is not authenticated");
-
-  const { data, error } = await supabase
-    .from("foods")
-    .insert([
-      {
-        user_id: userId,
-        name: payload.name,
-        category: payload.category,
-        quantity: payload.quantity,
-        expiry_date: payload.expiryDate,
-        status: "active",
-        notes: payload.notes || "",
-      },
-    ])
-    .select("id, name, category, quantity, expiry_date, status, notes, created_at, updated_at")
-    .single();
-
-  if (error) throw error;
-  return { item: mapFoodRow(data) };
+  const { data } = await api.post("/food", payload);
+  return unwrapResponse(data, "Failed to create food");
 }
 
 export async function updateFood(id, payload) {
-  const update = {
-    ...(payload.name !== undefined ? { name: payload.name } : {}),
-    ...(payload.category !== undefined ? { category: payload.category } : {}),
-    ...(payload.quantity !== undefined ? { quantity: payload.quantity } : {}),
-    ...(payload.expiryDate !== undefined ? { expiry_date: payload.expiryDate } : {}),
-    ...(payload.notes !== undefined ? { notes: payload.notes } : {}),
-    updated_at: new Date().toISOString(),
-  };
-
-  const { data, error } = await supabase
-    .from("foods")
-    .update(update)
-    .eq("id", id)
-    .select("id, name, category, quantity, expiry_date, status, notes, created_at, updated_at")
-    .single();
-
-  if (error) throw error;
-  return { item: mapFoodRow(data) };
+  const { data } = await api.put(`/food/${id}`, payload);
+  return unwrapResponse(data, "Failed to update food");
 }
 
 export async function markFoodStatus(id, status) {
-  const update = {
-    status,
-    updated_at: new Date().toISOString(),
-    ...(status === "consumed" ? { consumed_at: new Date().toISOString(), wasted_at: null } : {}),
-    ...(status === "wasted" ? { wasted_at: new Date().toISOString(), consumed_at: null } : {}),
-  };
-
-  const { data, error } = await supabase
-    .from("foods")
-    .update(update)
-    .eq("id", id)
-    .select("id, name, category, quantity, expiry_date, status, notes, created_at, updated_at")
-    .single();
-
-  if (error) throw error;
-  return { item: mapFoodRow(data) };
+  const { data } = await api.patch(`/food/${id}/status`, { status });
+  return unwrapResponse(data, "Failed to update food status");
 }
 
 export async function deleteFood(id) {
-  const { error } = await supabase.from("foods").delete().eq("id", id);
-  if (error) throw error;
-  return {};
+  const { data } = await api.delete(`/food/${id}`);
+  return unwrapResponse(data, "Failed to delete food");
 }
