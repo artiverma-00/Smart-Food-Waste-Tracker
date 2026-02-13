@@ -14,12 +14,40 @@ const app = express();
 
 app.use(helmet());
 app.use(morgan(config.nodeEnv === "production" ? "combined" : "dev"));
-app.use(
-  cors({
-    origin: config.clientUrl,
-    credentials: true,
-  })
-);
+
+const explicitAllowedOrigins = new Set(config.clientUrls);
+const dynamicAllowedPatterns = config.allowVercelPreviews ? [/\.vercel\.app$/] : [];
+
+const corsOptions = {
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  origin(origin, callback) {
+    // Allow non-browser tools (curl/postman) and same-origin requests.
+    if (!origin) return callback(null, true);
+
+    if (explicitAllowedOrigins.has(origin)) {
+      return callback(null, true);
+    }
+
+    let host;
+    try {
+      host = new URL(origin).hostname;
+    } catch (error) {
+      return callback(new Error("CORS origin format is invalid"));
+    }
+
+    const matchesDynamicPattern = dynamicAllowedPatterns.some((pattern) => pattern.test(host));
+    if (matchesDynamicPattern) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 app.use(express.json({ limit: "1mb" }));
 
